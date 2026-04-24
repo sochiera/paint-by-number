@@ -170,3 +170,108 @@ def test_max_regions_enforced():
         max_regions=50,
     )
     assert _count_connected_regions(result.indices) <= 50
+
+
+def _make_noisy_with_object(h=128, w=128, seed=3):
+    """Noisy textured dark background with a large bright central object."""
+    rng = np.random.default_rng(seed)
+    img = rng.integers(20, 80, size=(h, w, 3), dtype=np.int16)
+    yy, xx = np.ogrid[:h, :w]
+    # Large central disc — size big enough that cleanup preserves it.
+    disc = (yy - h // 2) ** 2 + (xx - w // 2) ** 2 <= (min(h, w) // 3) ** 2
+    disc_noise = rng.integers(-10, 11, size=(h, w, 3), dtype=np.int16)
+    disc_colour = np.array([240, 240, 240], dtype=np.int16)
+    img = np.where(disc[..., None], disc_colour + disc_noise, img)
+    return np.clip(img, 0, 255).astype(np.uint8)
+
+
+def test_majority_cleanup_reduces_components():
+    image = _make_noisy_with_object()
+    common = dict(
+        k=5,
+        min_region_size=1,
+        template_scale=1,
+        smooth="none",
+        random_state=0,
+    )
+    none_result = generate(image, cleanup="none", **common)
+    maj_result = generate(image, cleanup="majority", **common)
+
+    n_none = _count_connected_regions(none_result.indices)
+    n_maj = _count_connected_regions(maj_result.indices)
+
+    assert n_maj <= n_none * 0.7, (
+        f"majority cleanup produced {n_maj} regions, none {n_none}; "
+        "expected majority to drop by at least 30%."
+    )
+
+
+def test_majority_cleanup_preserves_main_object():
+    from scipy import ndimage
+    from skimage.feature import canny
+
+    image = _make_noisy_with_object()
+    common = dict(
+        k=5,
+        min_region_size=1,
+        template_scale=1,
+        smooth="none",
+        random_state=0,
+    )
+    none_result = generate(image, cleanup="none", **common)
+    maj_result = generate(image, cleanup="majority", **common)
+
+    # Compare Canny edges of the quantised preview; the object's contour
+    # should remain essentially the same. Restrict to a band around the
+    # central disc so we measure the object's contour, not background
+    # speckle that cleanup is expected to dissolve.
+    none_edges = canny(none_result.preview.mean(axis=2) / 255.0, sigma=1.0)
+    maj_edges = canny(maj_result.preview.mean(axis=2) / 255.0, sigma=1.0)
+
+    h, w = image.shape[:2]
+    yy, xx = np.ogrid[:h, :w]
+    r_outer = min(h, w) // 3 + 4
+    r_inner = min(h, w) // 3 - 4
+    dist2 = (yy - h // 2) ** 2 + (xx - w // 2) ** 2
+    band = (dist2 <= r_outer**2) & (dist2 >= r_inner**2)
+
+    # Preservation: how much of the original (cleanup-off) contour
+    # survives in the cleanup-on contour with a 1-pixel tolerance for
+    # sub-pixel drift. Same style as test_bilateral_preserves_object_edges.
+    ref_band = none_edges & band
+    maj_tolerance = ndimage.binary_dilation(maj_edges & band, iterations=1)
+    preserved = np.logical_and(ref_band, maj_tolerance).sum() / max(
+        ref_band.sum(), 1
+    )
+
+    assert preserved >= 0.9, (
+        f"main-object contour preservation was {preserved:.3f}; expected >= 0.90"
+    )
+
+
+def test_cleanup_none_is_noop():
+    """cleanup='none' must produce identical indices to prior behaviour
+    (no majority filter applied between quantise and merge)."""
+    from pbn.quantize import quantize
+
+    image = _make_noisy_with_object()
+    # Replicate what generate() does internally with cleanup='none' and
+    # no merging: a bare quantisation output.
+    _, expected_indices = quantize(image, k=5, random_state=0)
+
+    result = generate(
+        image,
+        k=5,
+        min_region_size=0,
+        template_scale=1,
+        smooth="none",
+        cleanup="none",
+        random_state=0,
+    )
+    np.testing.assert_array_equal(result.indices, expected_indices)
+
+
+def test_generate_rejects_unknown_cleanup():
+    image = _make_stripe_image()
+    with pytest.raises(ValueError):
+        generate(image, k=3, cleanup="bogus")

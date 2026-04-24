@@ -12,6 +12,7 @@ from pbn.render import render_palette, render_preview, render_template
 
 
 SMOOTHING_CHOICES = ("none", "gaussian", "bilateral", "meanshift")
+CLEANUP_CHOICES = ("none", "majority")
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,37 @@ def _meanshift_smooth(image: np.ndarray, sp: float, sr: float) -> np.ndarray:
     return filtered[..., ::-1].copy()
 
 
+def _majority_filter(indices: np.ndarray, size: int = 3) -> np.ndarray:
+    """Replace each label with the most frequent label in a ``size x size``
+    neighbourhood (edge-replicated border). Ties broken by lowest label.
+
+    Vectorised: for each unique label ``l``, compute the neighbourhood
+    count of ``l`` via ``uniform_filter`` on the binary mask, then take
+    the argmax over labels per pixel. Complexity ``O(k * H * W)``.
+    """
+    if indices.ndim != 2:
+        raise ValueError(f"expected 2D indices, got shape {indices.shape}")
+    labels = np.unique(indices)
+    h, w = indices.shape
+    # counts[l, y, x] = number of pixels with label l in the window around (y, x)
+    counts = np.empty((len(labels), h, w), dtype=np.float32)
+    area = float(size * size)
+    for i, lbl in enumerate(labels):
+        mask = (indices == lbl).astype(np.float32)
+        # uniform_filter with mode='nearest' gives the mean over the
+        # size x size window with edge replication; multiply by area
+        # to recover the integer count (as float — exact enough for argmax).
+        ndimage.uniform_filter(
+            mask, size=size, output=counts[i], mode="nearest"
+        )
+        counts[i] *= area
+    # argmax over axis 0 picks the label with the highest count; numpy's
+    # argmax returns the first occurrence on ties, and `labels` is sorted
+    # ascending, so ties are broken by lowest label — deterministic.
+    winner = np.argmax(counts, axis=0)
+    return labels[winner].astype(indices.dtype)
+
+
 def _smooth(
     image: np.ndarray,
     mode: str,
@@ -101,6 +133,7 @@ def generate(
     meanshift_sp: float = 10.0,
     meanshift_sr: float = 20.0,
     max_regions: int | None = None,
+    cleanup: str | None = "majority",
 ) -> PBNResult:
     """Turn an RGB image into a paint-by-number template bundle.
 
@@ -130,6 +163,11 @@ def generate(
         in the output. When set, the smallest regions are iteratively merged
         into the adjacent region with the longest shared border until the
         total drops to this value. ``None`` (default) disables the stage.
+    cleanup : label-map cleanup mode applied after quantisation and before
+        region merging. ``"majority"`` (default) replaces each pixel's label
+        with the most frequent label in its 3x3 neighbourhood, which
+        dissolves isolated speckles without moving strong contours.
+        ``"none"`` or ``None`` disables cleanup.
     """
     if image.ndim != 3 or image.shape[2] != 3:
         raise ValueError(f"expected (H, W, 3) RGB image, got {image.shape}")
@@ -137,6 +175,12 @@ def generate(
         raise ValueError(
             f"unknown smoothing mode {smooth!r}; "
             f"expected one of {SMOOTHING_CHOICES}"
+        )
+    cleanup_mode = "none" if cleanup is None else cleanup
+    if cleanup_mode not in CLEANUP_CHOICES:
+        raise ValueError(
+            f"unknown cleanup mode {cleanup!r}; "
+            f"expected one of {CLEANUP_CHOICES}"
         )
 
     working = _smooth(
@@ -150,6 +194,9 @@ def generate(
     )
 
     palette, indices = quantize(working, k=k, random_state=random_state)
+
+    if cleanup_mode == "majority":
+        indices = _majority_filter(indices, size=3)
 
     if min_region_size > 1:
         indices = merge_small_regions(indices, min_size=min_region_size)

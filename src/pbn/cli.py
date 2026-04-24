@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from pbn.io import load_image, save_image
-from pbn.pipeline import SMOOTHING_CHOICES, generate
+from pbn.pipeline import CLEANUP_CHOICES, SMOOTHING_CHOICES, generate
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -53,6 +53,16 @@ def _build_parser() -> argparse.ArgumentParser:
             "pre-quantisation smoothing filter. 'gaussian' (default) uses "
             "--blur as sigma; 'bilateral' and 'meanshift' preserve edges "
             "while flattening textured regions; 'none' skips smoothing."
+        ),
+    )
+    p.add_argument(
+        "--cleanup",
+        choices=CLEANUP_CHOICES,
+        default="majority",
+        help=(
+            "label-map cleanup applied after quantisation. 'majority' "
+            "(default) runs a 3x3 majority filter that dissolves isolated "
+            "speckles without moving strong contours; 'none' disables it."
         ),
     )
     p.add_argument(
@@ -104,6 +114,7 @@ def main(argv: list[str] | None = None) -> int:
         random_state=args.seed,
         smooth=args.smooth,
         max_regions=args.max_regions,
+        cleanup=args.cleanup,
     )
 
     args.output.mkdir(parents=True, exist_ok=True)
