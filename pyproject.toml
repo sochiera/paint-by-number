@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pbn"
+version = "0.1.0"
+description = "Paint-by-number template generator"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "Pillow",
+    "scikit-learn",
+    "scipy",
+]
+
+[project.scripts]
+pbn = "pbn.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
