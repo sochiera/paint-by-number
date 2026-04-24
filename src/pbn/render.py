@@ -4,9 +4,22 @@ import os
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+from scipy import ndimage
 
 from pbn.edges import region_boundaries
 from pbn.labels import compute_placements
+
+
+def _boundary_dilation_radius(scale: int) -> int:
+    """Return the dilation radius (in canvas pixels) used to thicken
+    region outlines after the nearest-neighbour upscale. Larger scales
+    get a wider line so it stays crisp on print; small scales are left
+    untouched to preserve fine detail."""
+    if scale >= 6:
+        return 2
+    if scale >= 4:
+        return 1
+    return 0
 
 
 # Preferred TrueType fonts, in order. ``load_default`` is used as a final
@@ -73,8 +86,20 @@ def render_template(
     # the painter's resolution.
     big = np.repeat(np.repeat(indices, scale, axis=0), scale, axis=1)
 
+    # Build the boundary mask at the painter's resolution and thicken it
+    # before any digits go down. Dilating before digit rendering keeps the
+    # numbers on top of the line, never under it.
+    boundary = region_boundaries(big)
+    dilation_radius = _boundary_dilation_radius(scale)
+    if dilation_radius > 0:
+        boundary = ndimage.binary_dilation(
+            boundary,
+            structure=ndimage.generate_binary_structure(2, 1),
+            iterations=dilation_radius,
+        )
+
     canvas = np.full((*big.shape, 3), 255, dtype=np.uint8)
-    canvas[region_boundaries(big)] = 0
+    canvas[boundary] = 0
 
     placements = compute_placements(indices, scale=scale)
 

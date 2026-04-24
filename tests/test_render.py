@@ -1,4 +1,5 @@
 import numpy as np
+from scipy import ndimage
 
 from pbn.render import render_palette, render_preview, render_template
 
@@ -79,6 +80,96 @@ def test_render_template_draws_digit_in_each_region():
     right = template[:, template.shape[1] // 2 :]
     assert (left == 0).all(axis=-1).sum() > 0
     assert (right == 0).all(axis=-1).sum() > 0
+
+
+def _two_region_indices(h: int = 32, w: int = 32) -> np.ndarray:
+    """A square image with a central rectangle of label 1 inside label 0 —
+    yields a long, well-defined boundary suitable for line-width tests."""
+    indices = np.zeros((h, w), dtype=np.int32)
+    indices[h // 4 : 3 * h // 4, w // 4 : 3 * w // 4] = 1
+    return indices
+
+
+def test_template_line_weight():
+    """At scale=6, dilation radius is 2 — the boundary line is at least
+    3 px thick everywhere. We measure thickness by eroding the boundary
+    band with a 3x3 cross: the result must still cover most of the band,
+    proving no 2-pixel-wide stretches remain."""
+    palette = np.array([[200, 0, 0], [0, 200, 0]], dtype=np.uint8)
+    indices = _two_region_indices(32, 32)
+    scale = 6
+    template = render_template(indices, palette, scale=scale)
+
+    black = (template == 0).all(axis=-1)
+
+    # Restrict to a vertical strip away from digit anchors so digits don't
+    # contaminate the analysis. The strip straddles the right vertical edge
+    # of the inner rectangle.
+    src_boundary_x = (3 * indices.shape[1] // 4) - 1  # last col of inner region
+    canvas_x = src_boundary_x * scale + scale // 2
+    strip = black[:, canvas_x - 2 : canvas_x + scale + 2]
+
+    assert strip.any(), "expected boundary pixels in the sample strip"
+
+    # Width >= 2 pointwise: every black pixel has a black 4-neighbour.
+    pad = np.pad(strip, 1, constant_values=False)
+    has_neighbour = (
+        pad[:-2, 1:-1] | pad[2:, 1:-1] | pad[1:-1, :-2] | pad[1:-1, 2:]
+    )
+    lonely = strip & ~has_neighbour
+    assert not lonely.any(), (
+        f"{int(lonely.sum())} isolated 1-px black pixels in strip"
+    )
+
+    # Width >= 3: erosion by a 3x3 cross still covers a substantial slice
+    # of the strip. With dilation radius 2 the line is ~5 px thick, so
+    # erosion leaves most of it; without dilation the original 2-px-wide
+    # boundary collapses to almost nothing under cross erosion.
+    cross = ndimage.generate_binary_structure(2, 1)
+    eroded = ndimage.binary_erosion(strip, structure=cross)
+    assert eroded.sum() >= int(0.4 * strip.sum()), (
+        f"eroded boundary too thin: {int(eroded.sum())}/{int(strip.sum())} "
+        f"black pixels survive 1-px erosion"
+    )
+
+
+def test_template_line_weight_scale_4():
+    """At scale=4, dilation radius is 1 so the boundary line is at least
+    2 px thick — no isolated 1-pixel pixels."""
+    palette = np.array([[200, 0, 0], [0, 200, 0]], dtype=np.uint8)
+    indices = _two_region_indices(32, 32)
+    scale = 4
+    template = render_template(indices, palette, scale=scale)
+
+    black = (template == 0).all(axis=-1)
+
+    # Same right-side strip as the scale=6 test.
+    src_boundary_x = (3 * indices.shape[1] // 4) - 1
+    canvas_x = src_boundary_x * scale + scale // 2
+    strip = black[:, canvas_x - 1 : canvas_x + scale + 1]
+
+    assert strip.any()
+
+    pad = np.pad(strip, 1, constant_values=False)
+    has_neighbour = (
+        pad[:-2, 1:-1] | pad[2:, 1:-1] | pad[1:-1, :-2] | pad[1:-1, 2:]
+    )
+    lonely = strip & ~has_neighbour
+    assert not lonely.any()
+
+
+def test_template_line_weight_scale_3_unchanged():
+    """At scale=3, no dilation should be applied — but the template still
+    renders sanely (boundaries present, mostly white canvas)."""
+    palette = np.array([[200, 0, 0], [0, 200, 0]], dtype=np.uint8)
+    indices = _two_region_indices(32, 32)
+    template = render_template(indices, palette, scale=3)
+
+    assert template.dtype == np.uint8
+    assert template.shape == (32 * 3, 32 * 3, 3)
+    white_ratio = (template == 255).all(axis=-1).mean()
+    assert white_ratio > 0.5
+    assert (template == 0).all(axis=-1).any()
 
 
 def test_render_palette_contains_every_swatch_colour():
