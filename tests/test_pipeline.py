@@ -157,3 +157,16 @@ def test_generate_rejects_unknown_smoothing():
     image = _make_stripe_image()
     with pytest.raises(ValueError):
         generate(image, k=3, smooth="bogus")
+
+
+def test_max_regions_enforced():
+    image = _make_textured_image(h=96, w=96, seed=2)
+    result = generate(
+        image,
+        k=6,
+        min_region_size=0,
+        template_scale=1,
+        smooth="none",
+        max_regions=50,
+    )
+    assert _count_connected_regions(result.indices) <= 50

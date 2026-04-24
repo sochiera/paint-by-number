@@ -87,6 +87,33 @@ def test_smooth_flag_rejects_unknown(tmp_path):
     assert excinfo.value.code != 0
 
 
+def test_max_regions_flag(tmp_path):
+    inp = tmp_path / "in.png"
+    _write_stripe_image(inp)
+    outdir = tmp_path / "out_maxregions"
+
+    exit_code = main(
+        [
+            str(inp),
+            "-o",
+            str(outdir),
+            "-k",
+            "3",
+            "--min-region",
+            "2",
+            "--scale",
+            "2",
+            "--max-regions",
+            "40",
+        ]
+    )
+    assert exit_code == 0
+    assert (outdir / "preview.png").exists()
+    assert (outdir / "template.png").exists()
+    assert (outdir / "legend.png").exists()
+    assert (outdir / "palette.json").exists()
+
+
 def test_cli_as_subprocess(tmp_path):
     """Smoke-test ``python -m pbn`` so the installed entry point works."""
     inp = tmp_path / "in.png"

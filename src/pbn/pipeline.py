@@ -7,7 +7,7 @@ from scipy import ndimage
 from skimage.restoration import denoise_bilateral
 
 from pbn.quantize import quantize
-from pbn.regions import merge_small_regions
+from pbn.regions import merge_small_regions, merge_to_target_count
 from pbn.render import render_palette, render_preview, render_template
 
 
@@ -100,6 +100,7 @@ def generate(
     bilateral_sigma_spatial: float = 3.0,
     meanshift_sp: float = 10.0,
     meanshift_sr: float = 20.0,
+    max_regions: int | None = None,
 ) -> PBNResult:
     """Turn an RGB image into a paint-by-number template bundle.
 
@@ -125,6 +126,10 @@ def generate(
     meanshift_sp, meanshift_sr : spatial and colour radii for mean-shift
         filtering; only consulted when ``smooth == "meanshift"``. Requires
         ``opencv-python`` to be installed.
+    max_regions : optional upper bound on the number of 4-connected regions
+        in the output. When set, the smallest regions are iteratively merged
+        into the adjacent region with the longest shared border until the
+        total drops to this value. ``None`` (default) disables the stage.
     """
     if image.ndim != 3 or image.shape[2] != 3:
         raise ValueError(f"expected (H, W, 3) RGB image, got {image.shape}")
@@ -148,6 +153,9 @@ def generate(
 
     if min_region_size > 1:
         indices = merge_small_regions(indices, min_size=min_region_size)
+
+    if max_regions is not None:
+        indices = merge_to_target_count(indices, max_regions=max_regions)
 
     preview = render_preview(palette, indices)
     template = render_template(indices, palette, scale=template_scale)

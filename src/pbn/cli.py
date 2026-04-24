@@ -56,6 +56,17 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--max-regions",
+        type=int,
+        default=None,
+        dest="max_regions",
+        help=(
+            "cap the number of 4-connected regions in the output by "
+            "iteratively merging the smallest regions into their longest-"
+            "border neighbour. Disabled by default."
+        ),
+    )
+    p.add_argument(
         "--scale",
         type=int,
         default=4,
@@ -78,6 +89,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"--colors must be >= 1, got {args.colors}")
     if args.scale < 1:
         parser.error(f"--scale must be >= 1, got {args.scale}")
+    if args.max_regions is not None and args.max_regions < 1:
+        parser.error(
+            f"--max-regions must be >= 1, got {args.max_regions}"
+        )
 
     image = load_image(args.input)
     result = generate(
@@ -88,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
         template_scale=args.scale,
         random_state=args.seed,
         smooth=args.smooth,
+        max_regions=args.max_regions,
     )
 
     args.output.mkdir(parents=True, exist_ok=True)
