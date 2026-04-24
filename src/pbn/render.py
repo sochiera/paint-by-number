@@ -1,11 +1,23 @@
 from __future__ import annotations
 
+import os
+
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from pbn.edges import region_boundaries
-from pbn.labels import label_positions
-from pbn.regions import label_regions
+from pbn.labels import compute_placements
+
+
+# Preferred TrueType fonts, in order. ``load_default`` is used as a final
+# fallback when no TrueType file is discoverable on the host system — pixel
+# size isn't selectable there, so adaptive sizing degrades gracefully.
+_TTF_CANDIDATES = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+)
 
 
 def render_preview(palette: np.ndarray, indices: np.ndarray) -> np.ndarray:
@@ -27,6 +39,12 @@ def render_preview(palette: np.ndarray, indices: np.ndarray) -> np.ndarray:
 
 
 def _load_font(size: int) -> ImageFont.ImageFont:
+    for path in _TTF_CANDIDATES:
+        if os.path.exists(path):
+            try:
+                return ImageFont.truetype(path, size=max(1, int(size)))
+            except OSError:
+                continue
     try:
         return ImageFont.load_default(size=size)
     except TypeError:  # older Pillow
@@ -39,7 +57,8 @@ def render_template(
     scale: int = 1,
 ) -> np.ndarray:
     """Render the painter-facing template: white canvas, black region
-    outlines, and the palette-index digit inside every region.
+    outlines, and the palette-index digit inside every region. Regions too
+    small for an inscribed digit get a lead-line to a nearby roomy anchor.
 
     Parameters
     ----------
@@ -57,28 +76,49 @@ def render_template(
     canvas = np.full((*big.shape, 3), 255, dtype=np.uint8)
     canvas[region_boundaries(big)] = 0
 
-    # Label regions on the original resolution so tiny single-pixel regions
-    # share one anchor even after upscaling.
-    labels = label_regions(indices)
-    positions = label_positions(labels)
+    placements = compute_placements(indices, scale=scale)
 
     img = Image.fromarray(canvas)
     draw = ImageDraw.Draw(img)
-    font_size = max(8, scale * 2)
-    font = _load_font(font_size)
 
-    for x, y, _region_lbl in positions:
-        digit = str(int(indices[y, x]) + 1)
-        cx = x * scale + scale // 2
-        cy = y * scale + scale // 2
+    def _source_to_canvas(yx: tuple[int, int]) -> tuple[int, int]:
+        y, x = yx
+        return (y * scale + scale // 2, x * scale + scale // 2)
+
+    for p in placements:
+        digit = str(int(p["palette_index"]) + 1)
+        font = _load_font(p["digit_size"])
+        cy, cx = _source_to_canvas(p["digit_pos"])
+
+        if p["leadline_from"] is not None and p["leadline_to"] is not None:
+            ly, lx = _source_to_canvas(p["leadline_from"])
+            ty, tx = _source_to_canvas(p["leadline_to"])
+            # Shorten the line slightly at the digit end so it doesn't
+            # overwrite the glyph.
+            dy = ty - ly
+            dx = tx - lx
+            length = float(np.hypot(dy, dx))
+            if length > 0:
+                pad = min(length * 0.5, p["digit_size"] * 0.6)
+                ly = int(round(ly + (dy / length) * pad))
+                lx = int(round(lx + (dx / length) * pad))
+            draw.line([(lx, ly), (tx, ty)], fill=(0, 0, 0), width=1)
+
         try:
-            draw.text((cx, cy), digit, fill=(0, 0, 0), font=font, anchor="mm")
+            draw.text(
+                (cx, cy), digit, fill=(0, 0, 0), font=font, anchor="mm"
+            )
         except (TypeError, ValueError):
             # Fallback for Pillow without ``anchor`` support.
             bbox = draw.textbbox((0, 0), digit, font=font)
             tw = bbox[2] - bbox[0]
             th = bbox[3] - bbox[1]
-            draw.text((cx - tw // 2, cy - th // 2), digit, fill=(0, 0, 0), font=font)
+            draw.text(
+                (cx - tw // 2, cy - th // 2),
+                digit,
+                fill=(0, 0, 0),
+                font=font,
+            )
 
     return np.asarray(img, dtype=np.uint8)
 
