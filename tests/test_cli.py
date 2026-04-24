@@ -52,6 +52,41 @@ def test_cli_rejects_bad_k(tmp_path):
     assert excinfo.value.code != 0
 
 
+def test_smooth_flag_accepts_bilateral(tmp_path):
+    inp = tmp_path / "in.png"
+    _write_stripe_image(inp)
+    outdir = tmp_path / "out_bilateral"
+
+    exit_code = main(
+        [
+            str(inp),
+            "-o",
+            str(outdir),
+            "-k",
+            "3",
+            "--min-region",
+            "2",
+            "--scale",
+            "2",
+            "--smooth",
+            "bilateral",
+        ]
+    )
+    assert exit_code == 0
+    assert (outdir / "preview.png").exists()
+
+
+def test_smooth_flag_rejects_unknown(tmp_path):
+    import pytest
+
+    inp = tmp_path / "in.png"
+    _write_stripe_image(inp)
+    outdir = tmp_path / "out_bogus"
+    with pytest.raises(SystemExit) as excinfo:
+        main([str(inp), "-o", str(outdir), "--smooth", "bogus"])
+    assert excinfo.value.code != 0
+
+
 def test_cli_as_subprocess(tmp_path):
     """Smoke-test ``python -m pbn`` so the installed entry point works."""
     inp = tmp_path / "in.png"

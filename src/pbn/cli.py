@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from pbn.io import load_image, save_image
-from pbn.pipeline import generate
+from pbn.pipeline import SMOOTHING_CHOICES, generate
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -40,7 +40,20 @@ def _build_parser() -> argparse.ArgumentParser:
         "--blur",
         type=float,
         default=0.0,
-        help="Gaussian blur sigma applied before quantisation (0 disables).",
+        help=(
+            "Gaussian blur sigma applied before quantisation (0 disables). "
+            "Kept for backwards compatibility; prefer --smooth."
+        ),
+    )
+    p.add_argument(
+        "--smooth",
+        choices=SMOOTHING_CHOICES,
+        default="gaussian",
+        help=(
+            "pre-quantisation smoothing filter. 'gaussian' (default) uses "
+            "--blur as sigma; 'bilateral' and 'meanshift' preserve edges "
+            "while flattening textured regions; 'none' skips smoothing."
+        ),
     )
     p.add_argument(
         "--scale",
@@ -74,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         blur_sigma=args.blur,
         template_scale=args.scale,
         random_state=args.seed,
+        smooth=args.smooth,
     )
 
     args.output.mkdir(parents=True, exist_ok=True)
