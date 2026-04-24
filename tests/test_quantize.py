@@ -14,19 +14,21 @@ def _two_color_image():
 
 def test_quantize_returns_expected_shapes():
     img = _two_color_image()
-    palette, indices = quantize(img, k=2, random_state=0)
+    palette, indices, effective_k = quantize(img, k=2, random_state=0)
 
     assert palette.dtype == np.uint8
     assert palette.shape == (2, 3)
     assert indices.dtype.kind in ("i", "u")
     assert indices.shape == (4, 4)
+    assert isinstance(effective_k, int)
+    assert 1 <= effective_k <= 2
 
 
 def test_quantize_recovers_two_colors_exactly():
     img = _two_color_image()
-    palette, indices = quantize(img, k=2, random_state=0)
+    palette, indices, effective_k = quantize(img, k=2, random_state=0)
 
-    palette_set = {tuple(c) for c in palette}
+    palette_set = {tuple(c) for c in palette[:effective_k]}
     assert palette_set == {(255, 0, 0), (0, 255, 0)}
 
     reconstructed = palette[indices]
@@ -37,20 +39,24 @@ def test_quantize_indices_in_range():
     rng = np.random.default_rng(0)
     img = rng.integers(0, 256, (8, 8, 3), dtype=np.uint8)
     k = 5
-    palette, indices = quantize(img, k=k, random_state=0)
+    palette, indices, effective_k = quantize(
+        img, k=k, random_state=0, min_delta_e=0.0
+    )
 
     assert palette.shape == (k, 3)
     assert indices.min() >= 0
-    assert indices.max() < k
+    assert indices.max() < effective_k
+    assert effective_k <= k
 
 
 def test_quantize_k_larger_than_unique_colors_collapses():
     img = _two_color_image()
-    palette, indices = quantize(img, k=8, random_state=0)
+    palette, indices, effective_k = quantize(img, k=8, random_state=0)
 
     unique_used = np.unique(indices)
     # only 2 distinct colors exist, so no more than 2 indices should actually be used
     assert len(unique_used) == 2
+    assert effective_k == 2
 
 
 def test_quantize_rejects_bad_k():
@@ -89,7 +95,9 @@ def _dominant_grey_image_with_accents(size: int = 128) -> np.ndarray:
 def test_lab_palette_is_perceptually_diverse():
     img = _dominant_grey_image_with_accents()
     k = 12
-    palette, _ = quantize(img, k=k, random_state=0)
+    palette, _, effective_k = quantize(
+        img, k=k, random_state=0, min_delta_e=0.0
+    )
 
     lab = rgb2lab(palette.reshape(1, -1, 3)).reshape(-1, 3)
 
@@ -109,8 +117,71 @@ def test_quantize_deterministic_with_random_state():
     rng = np.random.default_rng(42)
     img = rng.integers(0, 256, (16, 16, 3), dtype=np.uint8)
 
-    p1, i1 = quantize(img, k=4, random_state=123)
-    p2, i2 = quantize(img, k=4, random_state=123)
+    p1, i1, k1 = quantize(img, k=4, random_state=123, min_delta_e=0.0)
+    p2, i2, k2 = quantize(img, k=4, random_state=123, min_delta_e=0.0)
 
     assert np.array_equal(p1, p2)
     assert np.array_equal(i1, i2)
+    assert k1 == k2
+
+
+def _near_duplicate_grey_image(size: int = 96) -> np.ndarray:
+    """Build an image whose dominant tones are a ladder of near-duplicate
+    greys plus a couple of strongly-separated anchor colours. Default
+    K-means with ``k=12`` will place several centroids on the grey ladder
+    (pairs ΔE ≈ 2-6), so the collapse loop must merge them; two anchors
+    remain perceptually distinct so ``effective_k >= 2`` after collapsing.
+    """
+    rng = np.random.default_rng(0)
+    img = np.zeros((size, size, 3), dtype=np.int16)
+    # Top 3/4: a ladder of near-duplicate mid-greys (the "noise" K-means
+    # will waste many centroids on).
+    grey_band = (3 * size) // 4
+    greys = [118, 122, 126, 130, 134, 138, 142, 146]
+    for i, g in enumerate(greys):
+        r0 = (i * grey_band) // len(greys)
+        r1 = ((i + 1) * grey_band) // len(greys)
+        img[r0:r1, :, :] = g
+    # Bottom quarter: two high-contrast anchors (near-black and near-white)
+    # so even aggressive collapsing leaves at least two well-separated
+    # centroids in the palette.
+    anchor_band = size - grey_band
+    split = grey_band + anchor_band // 2
+    img[grey_band:split, :, :] = 20
+    img[split:, :, :] = 235
+    noise = rng.integers(-2, 3, (size, size, 3), dtype=np.int16)
+    img = np.clip(img + noise, 0, 255).astype(np.uint8)
+    return img
+
+
+def test_palette_respects_min_delta_e():
+    img = _near_duplicate_grey_image()
+    threshold = 10.0
+    palette, _, effective_k = quantize(
+        img, k=12, random_state=0, min_delta_e=threshold
+    )
+
+    used = palette[:effective_k]
+    lab = rgb2lab(used.reshape(1, -1, 3)).reshape(-1, 3)
+    for i in range(effective_k):
+        for j in range(i + 1, effective_k):
+            delta = float(
+                deltaE_cie76(lab[i][None, :], lab[j][None, :]).item()
+            )
+            assert delta >= threshold, (
+                f"pair ({i}, {j}) has delta_e {delta:.2f} < {threshold}"
+            )
+
+
+def test_palette_reports_effective_k():
+    img = _near_duplicate_grey_image()
+    k = 12
+    palette, indices, effective_k = quantize(
+        img, k=k, random_state=0, min_delta_e=10.0
+    )
+
+    assert effective_k < k
+    assert effective_k >= 2
+    unique_used = np.unique(indices)
+    assert len(unique_used) == effective_k
+    assert int(indices.max()) < effective_k

@@ -38,6 +38,11 @@ def test_cli_main_writes_expected_files(tmp_path):
     for entry in palette_data["colors"]:
         assert "index" in entry and "rgb" in entry
         assert len(entry["rgb"]) == 3
+    assert "effective_k" in palette_data
+    assert isinstance(palette_data["effective_k"], int)
+    assert 1 <= palette_data["effective_k"] <= 3
+    assert "min_delta_e" in palette_data
+    assert isinstance(palette_data["min_delta_e"], (int, float))
 
 
 def test_cli_rejects_bad_k(tmp_path):

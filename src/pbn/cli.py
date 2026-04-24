@@ -77,6 +77,18 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--min-delta-e",
+        type=float,
+        default=7.0,
+        dest="min_delta_e",
+        help=(
+            "minimum CIE76 Lab distance between any two palette centroids. "
+            "Pairs closer than this are collapsed by re-running K-means "
+            "with k-1 until all remaining centroids are this far apart "
+            "(or only two remain). 0 disables. Default 7.0."
+        ),
+    )
+    p.add_argument(
         "--scale",
         type=int,
         default=4,
@@ -103,6 +115,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(
             f"--max-regions must be >= 1, got {args.max_regions}"
         )
+    if args.min_delta_e < 0:
+        parser.error(
+            f"--min-delta-e must be >= 0, got {args.min_delta_e}"
+        )
 
     image = load_image(args.input)
     result = generate(
@@ -115,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
         smooth=args.smooth,
         max_regions=args.max_regions,
         cleanup=args.cleanup,
+        min_delta_e=args.min_delta_e,
     )
 
     args.output.mkdir(parents=True, exist_ok=True)
@@ -124,9 +141,11 @@ def main(argv: list[str] | None = None) -> int:
 
     palette_json = {
         "k": int(len(result.palette)),
+        "effective_k": int(result.effective_k),
+        "min_delta_e": float(args.min_delta_e),
         "colors": [
             {"index": i + 1, "rgb": [int(c) for c in rgb]}
-            for i, rgb in enumerate(result.palette)
+            for i, rgb in enumerate(result.palette[: result.effective_k])
         ],
     }
     (args.output / "palette.json").write_text(json.dumps(palette_json, indent=2))

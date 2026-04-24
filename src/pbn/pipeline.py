@@ -19,11 +19,12 @@ CLEANUP_CHOICES = ("none", "majority")
 class PBNResult:
     """The full output of the paint-by-number pipeline."""
 
-    palette: np.ndarray  # (k, 3) uint8
-    indices: np.ndarray  # (H, W) int32, values in [0, k)
+    palette: np.ndarray  # (k, 3) uint8 — only first effective_k rows used
+    indices: np.ndarray  # (H, W) int32, values in [0, effective_k)
     preview: np.ndarray  # (H, W, 3) uint8
     template: np.ndarray  # (H*scale, W*scale, 3) uint8
     legend: np.ndarray  # (?, ?, 3) uint8
+    effective_k: int = 0
 
 
 def _gaussian_smooth(image: np.ndarray, sigma: float) -> np.ndarray:
@@ -134,6 +135,7 @@ def generate(
     meanshift_sr: float = 20.0,
     max_regions: int | None = None,
     cleanup: str | None = "majority",
+    min_delta_e: float = 7.0,
 ) -> PBNResult:
     """Turn an RGB image into a paint-by-number template bundle.
 
@@ -168,6 +170,11 @@ def generate(
         with the most frequent label in its 3x3 neighbourhood, which
         dissolves isolated speckles without moving strong contours.
         ``"none"`` or ``None`` disables cleanup.
+    min_delta_e : minimum CIE76 Lab distance between any two palette
+        centroids. After the initial K-means fit, pairs closer than this
+        threshold are collapsed by re-running K-means with ``k - 1`` until
+        every remaining pair is at least ``min_delta_e`` apart (or only two
+        centroids remain). Set to ``0`` to disable collapsing. Default ``7``.
     """
     if image.ndim != 3 or image.shape[2] != 3:
         raise ValueError(f"expected (H, W, 3) RGB image, got {image.shape}")
@@ -193,7 +200,12 @@ def generate(
         meanshift_sr=meanshift_sr,
     )
 
-    palette, indices = quantize(working, k=k, random_state=random_state)
+    palette, indices, effective_k = quantize(
+        working,
+        k=k,
+        random_state=random_state,
+        min_delta_e=min_delta_e,
+    )
 
     if cleanup_mode == "majority":
         indices = _majority_filter(indices, size=3)
@@ -204,9 +216,10 @@ def generate(
     if max_regions is not None:
         indices = merge_to_target_count(indices, max_regions=max_regions)
 
-    preview = render_preview(palette, indices)
-    template = render_template(indices, palette, scale=template_scale)
-    legend = render_palette(palette)
+    used_palette = palette[:effective_k]
+    preview = render_preview(used_palette, indices)
+    template = render_template(indices, used_palette, scale=template_scale)
+    legend = render_palette(used_palette)
 
     return PBNResult(
         palette=palette,
@@ -214,4 +227,5 @@ def generate(
         preview=preview,
         template=template,
         legend=legend,
+        effective_k=effective_k,
     )

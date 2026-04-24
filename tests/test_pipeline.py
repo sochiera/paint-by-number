@@ -257,7 +257,7 @@ def test_cleanup_none_is_noop():
     image = _make_noisy_with_object()
     # Replicate what generate() does internally with cleanup='none' and
     # no merging: a bare quantisation output.
-    _, expected_indices = quantize(image, k=5, random_state=0)
+    _, expected_indices, _ = quantize(image, k=5, random_state=0)
 
     result = generate(
         image,
