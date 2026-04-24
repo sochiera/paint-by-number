@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from skimage.color import deltaE_cie76, rgb2lab
 
 from pbn.quantize import quantize
 
@@ -58,6 +59,50 @@ def test_quantize_rejects_bad_k():
         quantize(img, k=0)
     with pytest.raises(ValueError):
         quantize(img, k=-1)
+
+
+def _dominant_grey_image_with_accents(size: int = 128) -> np.ndarray:
+    rng = np.random.default_rng(0)
+    img = np.full((size, size, 3), 128, dtype=np.int16)
+    noise = rng.integers(-12, 13, (size, size, 3), dtype=np.int16)
+    img = img + noise
+
+    gradient = np.linspace(60, 200, size, dtype=np.int16)
+    img[:, :, 0] = np.clip(img[:, :, 0] + (gradient[None, :] - 128) // 3, 0, 255)
+    img[:, :, 1] = np.clip(img[:, :, 1] + (gradient[None, :] - 128) // 3, 0, 255)
+    img[:, :, 2] = np.clip(img[:, :, 2] + (gradient[None, :] - 128) // 3, 0, 255)
+
+    accents = [
+        ((5, 20, 5, 20), (220, 30, 30)),
+        ((5, 20, 30, 45), (30, 180, 40)),
+        ((5, 20, 55, 70), (40, 60, 220)),
+        ((30, 45, 5, 20), (230, 210, 40)),
+        ((30, 45, 30, 45), (200, 100, 30)),
+        ((30, 45, 55, 70), (120, 30, 180)),
+    ]
+    for (r0, r1, c0, c1), colour in accents:
+        img[r0:r1, c0:c1] = colour
+
+    return np.clip(img, 0, 255).astype(np.uint8)
+
+
+def test_lab_palette_is_perceptually_diverse():
+    img = _dominant_grey_image_with_accents()
+    k = 12
+    palette, _ = quantize(img, k=k, random_state=0)
+
+    lab = rgb2lab(palette.reshape(1, -1, 3)).reshape(-1, 3)
+
+    diverse_count = 0
+    for i in range(k):
+        others = np.delete(lab, i, axis=0)
+        min_delta = deltaE_cie76(lab[i][None, :], others).min()
+        if min_delta >= 15:
+            diverse_count += 1
+
+    assert diverse_count >= 6, (
+        f"expected >= 6 perceptually distinct colours, got {diverse_count}"
+    )
 
 
 def test_quantize_deterministic_with_random_state():
