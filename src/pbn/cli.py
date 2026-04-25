@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pbn.io import load_image, save_image
 from pbn.pipeline import CLEANUP_CHOICES, SMOOTHING_CHOICES, generate
+from pbn.print_size import PRINT_SIZES, resolve_print_params
 from pbn.saliency import SALIENCY_MODES
 from pbn.segment import PRESEGMENT_CHOICES
 
@@ -34,9 +35,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--min-region",
         type=int,
-        default=20,
+        default=None,
         dest="min_region",
-        help="merge connected regions smaller than this (pixels). 0 disables.",
+        help=(
+            "merge connected regions smaller than this (source pixels). "
+            "0 disables. When --print-size is set, defaults to the smallest "
+            "region that still covers ~4 mm² on the printed output; "
+            "otherwise defaults to 20."
+        ),
     )
     p.add_argument(
         "--blur",
@@ -150,8 +156,32 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--scale",
         type=int,
-        default=4,
-        help="template upscale factor for readable numbers (default: 4).",
+        default=None,
+        help=(
+            "template upscale factor for readable numbers. When "
+            "--print-size is set, defaults to the largest integer scale "
+            "that fits the page; otherwise defaults to 4."
+        ),
+    )
+    p.add_argument(
+        "--print-size",
+        choices=PRINT_SIZES,
+        default=None,
+        dest="print_size",
+        help=(
+            "target print page size; combined with --dpi, derives "
+            "sensible defaults for --scale and --min-region. Page "
+            "orientation matches the image's aspect."
+        ),
+    )
+    p.add_argument(
+        "--dpi",
+        type=int,
+        default=300,
+        help=(
+            "target print resolution in dots per inch (default: 300). "
+            "Only used when --print-size is set."
+        ),
     )
     p.add_argument(
         "--seed",
@@ -168,7 +198,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.colors < 1:
         parser.error(f"--colors must be >= 1, got {args.colors}")
-    if args.scale < 1:
+    if args.dpi < 1:
+        parser.error(f"--dpi must be >= 1, got {args.dpi}")
+    if args.scale is not None and args.scale < 1:
         parser.error(f"--scale must be >= 1, got {args.scale}")
     if args.max_regions is not None and args.max_regions < 1:
         parser.error(
@@ -192,6 +224,25 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     image = load_image(args.input)
+
+    # Resolve print-size defaults *after* the image is loaded so we know its
+    # aspect ratio. Explicit --scale / --min-region always win.
+    if args.print_size is not None:
+        resolution = resolve_print_params(
+            args.print_size,
+            dpi=args.dpi,
+            image_h=image.shape[0],
+            image_w=image.shape[1],
+        )
+        if args.scale is None:
+            args.scale = resolution.scale
+        if args.min_region is None:
+            args.min_region = resolution.min_region_size
+    if args.scale is None:
+        args.scale = 4
+    if args.min_region is None:
+        args.min_region = 20
+
     result = generate(
         image,
         k=args.colors,

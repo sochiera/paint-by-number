@@ -90,6 +90,10 @@ Options:
 - `--scale` — nearest-neighbour upscale of the template so digits are
   legible (default 4). Outlines are dilated 1 px at scale ≥ 4, 2 px at
   scale ≥ 6.
+- `--print-size {A4,A3,Letter}` + `--dpi` (default 300) — derive
+  sensible defaults for `--scale` and `--min-region` from the target
+  paper. Page orientation matches the image's aspect. Explicit
+  `--scale`/`--min-region` always override the derived value.
 - `--seed` — K-means random state for reproducible palettes.
 
 ## Output

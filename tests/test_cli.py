@@ -260,6 +260,74 @@ def test_presegment_flag_rejects_unknown(tmp_path):
     assert excinfo.value.code != 0
 
 
+def _write_landscape_image(path: Path, h: int = 90, w: int = 160):
+    img = np.zeros((h, w, 3), dtype=np.uint8)
+    img[:, : w // 3] = (255, 0, 0)
+    img[:, w // 3 : 2 * w // 3] = (0, 255, 0)
+    img[:, 2 * w // 3 :] = (0, 0, 255)
+    Image.fromarray(img).save(path)
+
+
+def test_print_size_resolves_scale(tmp_path):
+    inp = tmp_path / "in.png"
+    _write_landscape_image(inp, h=90, w=160)
+    outdir = tmp_path / "out_print_a4"
+
+    exit_code = main(
+        [
+            str(inp),
+            "-o",
+            str(outdir),
+            "-k",
+            "3",
+            "--print-size",
+            "A4",
+            "--dpi",
+            "300",
+        ]
+    )
+    assert exit_code == 0
+    template = np.asarray(Image.open(outdir / "template.png"))
+    # 1600 × 900 source × scale (resolved to integer fit on A4 landscape)
+    # Resolver gives scale = floor(min(3508/160, 2480/90)) = floor(min(21.9, 27.5)) = 21.
+    assert template.shape == (90 * 21, 160 * 21, 3)
+
+
+def test_print_size_explicit_scale_overrides(tmp_path):
+    inp = tmp_path / "in.png"
+    _write_landscape_image(inp)
+    outdir = tmp_path / "out_print_override"
+
+    exit_code = main(
+        [
+            str(inp),
+            "-o",
+            str(outdir),
+            "-k",
+            "3",
+            "--print-size",
+            "A4",
+            "--scale",
+            "3",
+        ]
+    )
+    assert exit_code == 0
+    template = np.asarray(Image.open(outdir / "template.png"))
+    assert template.shape[0] == 90 * 3
+    assert template.shape[1] == 160 * 3
+
+
+def test_print_size_rejects_unknown(tmp_path):
+    import pytest
+
+    inp = tmp_path / "in.png"
+    _write_landscape_image(inp)
+    outdir = tmp_path / "out_bad_size"
+    with pytest.raises(SystemExit) as excinfo:
+        main([str(inp), "-o", str(outdir), "--print-size", "Tabloid"])
+    assert excinfo.value.code != 0
+
+
 def test_cli_as_subprocess(tmp_path):
     """Smoke-test ``python -m pbn`` so the installed entry point works."""
     inp = tmp_path / "in.png"

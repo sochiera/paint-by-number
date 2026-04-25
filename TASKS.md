@@ -94,15 +94,25 @@ regionów w teksturach** i **klastry same-color z odrębnymi cyframi**.
 
 ## P1 — duża poprawa jakości
 
-### N4. Print-size aware (dawny T12)
-- Pliki: [src/pbn/cli.py](src/pbn/cli.py), [src/pbn/pipeline.py](src/pbn/pipeline.py).
-- Zmiana: `--print-size {A4,A3,Letter}` + `--dpi`. Wyliczają `scale`,
-  `min_region_size` (≥ 4 mm²), grubość linii i minimalny rozmiar cyfry.
-  Zostawić surowe `--scale`/`--min-region` jako advanced override.
-- Akceptacja:
-  - 1600×900 + `--print-size A4 --dpi 300` → template 3508×2480 px,
-    `min_region_size` ≥ piksele odpowiadające 4 mm² na druku.
-  - Test `tests/test_cli.py::test_print_size_resolves_scale`.
+### N4. Print-size aware ✅ ZROBIONE
+- Pliki: [src/pbn/print_size.py](src/pbn/print_size.py) (nowy),
+  [src/pbn/cli.py](src/pbn/cli.py).
+- `--print-size {A4,A3,Letter}` + `--dpi` (domyślnie 300). Orientacja
+  strony dobierana z aspektu obrazu. Z papieru wyliczamy:
+  - `scale` = największy integer mieszczący obraz na stronie.
+  - `min_region` = najmniejszy region źródłowy ≥ 4 mm² na wydruku.
+  Surowe `--scale` i `--min-region` zachowują pierwszeństwo nad wartością
+  pochodzącą z papieru.
+- Pomiar: 160×90 input + `--print-size A4 --dpi 300` daje template
+  ~3360×1890 (scale=21 — fit landscape A4). Dla 1600×900 byłoby
+  scale=2, min_region≈140.
+- Pokryte testami: `tests/test_print_size.py` (9 testów),
+  `test_print_size_resolves_scale`,
+  `test_print_size_explicit_scale_overrides`,
+  `test_print_size_rejects_unknown`. 117 passed (z 105 po N3).
+- Skipnięte: brak osobnego sterowania grubością linii i rozmiarem cyfr
+  z poziomu print-size (zostało w obecnym schemacie scale-driven).
+  Można rozszerzyć w N7.
 
 ### N5. Tone-mapping pre-quantize dla ciemnych zdjęć
 - Pliki: [src/pbn/pipeline.py](src/pbn/pipeline.py).
