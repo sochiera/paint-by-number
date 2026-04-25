@@ -14,6 +14,7 @@ from pbn.regions import (
 )
 from pbn.render import render_palette, render_preview, render_template
 from pbn.saliency import SALIENCY_MODES, compute_saliency_weights
+from pbn.segment import PRESEGMENT_CHOICES, slic_presegment
 
 
 SMOOTHING_CHOICES = ("none", "gaussian", "bilateral", "meanshift")
@@ -143,6 +144,9 @@ def generate(
     cleanup: str | None = "majority",
     min_delta_e: float = 7.0,
     saliency: str = "none",
+    presegment: str = "none",
+    slic_segments: int = 600,
+    slic_compactness: float = 10.0,
 ) -> PBNResult:
     """Turn an RGB image into a paint-by-number template bundle.
 
@@ -195,6 +199,15 @@ def generate(
         Sobel-magnitude fallback otherwise. Pulls centroids towards the
         weighted areas so subjects in cluttered backgrounds get their own
         palette colours.
+    presegment : pre-quantisation segmentation. ``"none"`` (default) feeds
+        the smoothed image directly to K-means. ``"slic"`` runs SLIC and
+        replaces every pixel with its superpixel's mean RGB before
+        quantisation; this collapses textured regions and can drastically
+        cut the eventual number of 4-connected paint regions.
+    slic_segments, slic_compactness : tuning for ``presegment='slic'``;
+        ignored otherwise. ``slic_segments`` is the approximate number of
+        superpixels and ``slic_compactness`` is SLIC's spatial-vs-colour
+        trade-off (~10 is sensible for typical photos).
     """
     if image.ndim != 3 or image.shape[2] != 3:
         raise ValueError(f"expected (H, W, 3) RGB image, got {image.shape}")
@@ -214,6 +227,11 @@ def generate(
             f"unknown saliency mode {saliency!r}; "
             f"expected one of {SALIENCY_MODES}"
         )
+    if presegment not in PRESEGMENT_CHOICES:
+        raise ValueError(
+            f"unknown presegment mode {presegment!r}; "
+            f"expected one of {PRESEGMENT_CHOICES}"
+        )
 
     working = _smooth(
         image,
@@ -225,9 +243,20 @@ def generate(
         meanshift_sr=meanshift_sr,
     )
 
+    # Saliency weights come from the smoothed image so edge cues survive even
+    # when SLIC has flattened intra-superpixel detail in the quantize input.
     weights = compute_saliency_weights(working, mode=saliency)
+
+    quantize_input = working
+    if presegment == "slic":
+        quantize_input = slic_presegment(
+            working,
+            n_segments=slic_segments,
+            compactness=slic_compactness,
+        )
+
     palette, indices, effective_k = quantize(
-        working,
+        quantize_input,
         k=k,
         random_state=random_state,
         min_delta_e=min_delta_e,

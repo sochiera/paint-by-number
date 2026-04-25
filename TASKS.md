@@ -69,17 +69,26 @@ regionów w teksturach** i **klastry same-color z odrębnymi cyframi**.
   `test_max_per_color_flag`,
   `test_max_per_color_flag_rejects_zero`. 94 passed (z 85 po N1).
 
-### N3. Przedkwantyzacyjna segmentacja superpikselami (SLIC)
-- Pliki: nowy `src/pbn/segment.py`, [src/pbn/pipeline.py](src/pbn/pipeline.py), [src/pbn/cli.py](src/pbn/cli.py).
-- Zmiana: opcjonalny krok przed K-means: `skimage.segmentation.slic` (Lab,
-  `n_segments` proporcjonalne do rozmiaru obrazu, `compactness ≈ 10`). K-means
-  działa potem na **średnich kolorach superpikseli** (ważonych liczbą
-  pikseli), a etykieta superpiksela przypisuje cały blok do jednego centroidu.
-  CLI: `--presegment {none,slic}`, `--slic-segments N`.
-- Akceptacja:
-  - Dla obecnego Cybertrucka liczba spójnych regionów spada ≥ 70 % przy
-    porównywalnej IoU obwiedni głównego obiektu (truck) względem oryginału.
-  - Test `tests/test_pipeline.py::test_slic_presegment_reduces_regions`.
+### N3. Przedkwantyzacyjna segmentacja superpikselami (SLIC) ✅ ZROBIONE
+- Pliki: [src/pbn/segment.py](src/pbn/segment.py) (nowy),
+  [src/pbn/pipeline.py](src/pbn/pipeline.py),
+  [src/pbn/cli.py](src/pbn/cli.py).
+- `slic_presegment` wektoryzowany przez `np.bincount`. CLI:
+  `--presegment {none,slic}`, `--slic-segments N`, `--slic-compactness F`.
+  Mapa saliency liczona z **smoothed image** (przed SLIC), nie z spłaszczonej —
+  szczegóły krawędzi pozostają w wagach.
+- Pomiar na noisy fixture'ze (400×600, k=8, max-regions=300):
+  - bez presegment: 78 komponentów.
+  - SLIC, 200 segmentów: 10 (-87 %).
+  - SLIC, 400 segmentów: 13 (-83 %).
+  - SLIC, 800 segmentów: 17 (-78 %).
+  - SLIC + saliency=auto + max-per-color=20: 12 komponentów.
+- Pokryte testami: `tests/test_segment.py` (6 testów),
+  `test_presegment_slic_reduces_total_regions`,
+  `test_presegment_none_matches_baseline`,
+  `test_generate_rejects_unknown_presegment`,
+  `test_presegment_flag`,
+  `test_presegment_flag_rejects_unknown`. 105 passed (z 94 po N2).
 
 ---
 

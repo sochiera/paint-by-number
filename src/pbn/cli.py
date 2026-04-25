@@ -8,6 +8,7 @@ from pathlib import Path
 from pbn.io import load_image, save_image
 from pbn.pipeline import CLEANUP_CHOICES, SMOOTHING_CHOICES, generate
 from pbn.saliency import SALIENCY_MODES
+from pbn.segment import PRESEGMENT_CHOICES
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -103,6 +104,38 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--presegment",
+        choices=PRESEGMENT_CHOICES,
+        default="none",
+        help=(
+            "pre-quantisation segmentation. 'none' (default) feeds the "
+            "smoothed image straight to K-means; 'slic' runs SLIC and "
+            "replaces every pixel with its superpixel's mean RGB, which "
+            "collapses textured regions before quantisation."
+        ),
+    )
+    p.add_argument(
+        "--slic-segments",
+        type=int,
+        default=600,
+        dest="slic_segments",
+        help=(
+            "approximate number of SLIC superpixels when "
+            "--presegment slic. Higher = more detail (default: 600)."
+        ),
+    )
+    p.add_argument(
+        "--slic-compactness",
+        type=float,
+        default=10.0,
+        dest="slic_compactness",
+        help=(
+            "SLIC spatial-vs-colour trade-off when --presegment slic. "
+            "Larger values give more compact, square-ish superpixels "
+            "(default: 10.0)."
+        ),
+    )
+    p.add_argument(
         "--saliency",
         choices=SALIENCY_MODES,
         default="none",
@@ -145,6 +178,14 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(
             f"--max-per-color must be >= 1, got {args.max_per_color}"
         )
+    if args.slic_segments < 1:
+        parser.error(
+            f"--slic-segments must be >= 1, got {args.slic_segments}"
+        )
+    if args.slic_compactness <= 0:
+        parser.error(
+            f"--slic-compactness must be > 0, got {args.slic_compactness}"
+        )
     if args.min_delta_e < 0:
         parser.error(
             f"--min-delta-e must be >= 0, got {args.min_delta_e}"
@@ -164,6 +205,9 @@ def main(argv: list[str] | None = None) -> int:
         cleanup=args.cleanup,
         min_delta_e=args.min_delta_e,
         saliency=args.saliency,
+        presegment=args.presegment,
+        slic_segments=args.slic_segments,
+        slic_compactness=args.slic_compactness,
     )
 
     args.output.mkdir(parents=True, exist_ok=True)

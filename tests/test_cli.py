@@ -225,6 +225,41 @@ def test_max_per_color_flag_rejects_zero(tmp_path):
     assert excinfo.value.code != 0
 
 
+def test_presegment_flag(tmp_path):
+    inp = tmp_path / "in.png"
+    _write_stripe_image(inp)
+    outdir = tmp_path / "out_slic"
+
+    exit_code = main(
+        [
+            str(inp),
+            "-o",
+            str(outdir),
+            "-k",
+            "3",
+            "--scale",
+            "2",
+            "--presegment",
+            "slic",
+            "--slic-segments",
+            "8",
+        ]
+    )
+    assert exit_code == 0
+    assert (outdir / "preview.png").exists()
+
+
+def test_presegment_flag_rejects_unknown(tmp_path):
+    import pytest
+
+    inp = tmp_path / "in.png"
+    _write_stripe_image(inp)
+    outdir = tmp_path / "out_presegment_bogus"
+    with pytest.raises(SystemExit) as excinfo:
+        main([str(inp), "-o", str(outdir), "--presegment", "bogus"])
+    assert excinfo.value.code != 0
+
+
 def test_cli_as_subprocess(tmp_path):
     """Smoke-test ``python -m pbn`` so the installed entry point works."""
     inp = tmp_path / "in.png"

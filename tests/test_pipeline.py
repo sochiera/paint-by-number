@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from pbn.pipeline import PBNResult, generate
+from pbn.regions import label_regions
 
 
 def _make_stripe_image(h=20, w=30, colours=((255, 0, 0), (0, 200, 0), (0, 0, 180))):
@@ -356,8 +357,6 @@ def _speckled_image(size: int = 80, seed: int = 0) -> np.ndarray:
 
 
 def _component_count_per_color(indices: np.ndarray) -> dict[int, int]:
-    from pbn.regions import label_regions  # noqa: PLC0415
-
     labels = label_regions(indices)
     flat = labels.ravel()
     palette_flat = indices.ravel()
@@ -397,3 +396,47 @@ def test_max_per_color_none_is_noop():
         image, k=3, min_region_size=5, template_scale=1, max_per_color=None
     )
     np.testing.assert_array_equal(base.indices, explicit.indices)
+
+
+def _heavily_textured_image(size: int = 128, seed: int = 5) -> np.ndarray:
+    """Single dominant hue with substantial per-pixel noise — without
+    presegment K-means picks several near-duplicate centroids and ends up
+    with many small components inside the texture."""
+    rng = np.random.default_rng(seed)
+    base = np.full((size, size, 3), (90, 110, 150), dtype=np.int16)
+    base += rng.integers(-35, 36, base.shape, dtype=np.int16)
+    return np.clip(base, 0, 255).astype(np.uint8)
+
+
+def test_presegment_slic_reduces_total_regions():
+    image = _heavily_textured_image()
+    args = dict(
+        k=4, min_region_size=0, smooth="none", cleanup="none",
+        min_delta_e=0.0, template_scale=1,
+    )
+    base = generate(image, **args)
+    pre = generate(image, presegment="slic", slic_segments=80, **args)
+
+    base_components = int(label_regions(base.indices).max()) + 1
+    pre_components = int(label_regions(pre.indices).max()) + 1
+
+    assert pre_components <= base_components * 0.5, (
+        f"SLIC presegment should cut total components by half or more on "
+        f"textured input; got {pre_components} (base {base_components})"
+    )
+
+
+def test_presegment_none_matches_baseline():
+    image = _make_stripe_image()
+    base = generate(image, k=3, min_region_size=5, template_scale=1)
+    explicit = generate(
+        image, k=3, min_region_size=5, template_scale=1, presegment="none"
+    )
+    np.testing.assert_array_equal(base.palette, explicit.palette)
+    np.testing.assert_array_equal(base.indices, explicit.indices)
+
+
+def test_generate_rejects_unknown_presegment():
+    image = _make_stripe_image()
+    with pytest.raises(ValueError):
+        generate(image, k=3, presegment="bogus")

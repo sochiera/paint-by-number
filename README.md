@@ -81,6 +81,12 @@ Options:
   centred on the canvas (cheap, no extra deps); `auto` calls
   `cv2.saliency.StaticSaliencyFineGrained` when `opencv-contrib-python` is
   installed, with a Sobel-magnitude fallback otherwise.
+- `--presegment {none,slic}` — pre-quantisation segmentation. `none`
+  (default) feeds the smoothed image straight to K-means. `slic` runs
+  SLIC and replaces every pixel with its superpixel's mean RGB before
+  quantisation, which collapses textured regions and dramatically reduces
+  the number of paint regions. Tune with `--slic-segments` (default 600,
+  higher = more detail) and `--slic-compactness` (default 10.0).
 - `--scale` — nearest-neighbour upscale of the template so digits are
   legible (default 4). Outlines are dilated 1 px at scale ≥ 4, 2 px at
   scale ≥ 6.
