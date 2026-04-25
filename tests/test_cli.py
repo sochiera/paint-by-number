@@ -154,6 +154,42 @@ def test_cleanup_flag_rejects_unknown(tmp_path):
     assert excinfo.value.code != 0
 
 
+def test_saliency_flag_records_mode_in_palette_json(tmp_path):
+    inp = tmp_path / "in.png"
+    _write_stripe_image(inp)
+    outdir = tmp_path / "out_saliency"
+
+    exit_code = main(
+        [
+            str(inp),
+            "-o",
+            str(outdir),
+            "-k",
+            "3",
+            "--min-region",
+            "2",
+            "--scale",
+            "2",
+            "--saliency",
+            "center",
+        ]
+    )
+    assert exit_code == 0
+    palette_data = json.loads((outdir / "palette.json").read_text())
+    assert palette_data["saliency"] == "center"
+
+
+def test_saliency_flag_rejects_unknown(tmp_path):
+    import pytest
+
+    inp = tmp_path / "in.png"
+    _write_stripe_image(inp)
+    outdir = tmp_path / "out_saliency_bogus"
+    with pytest.raises(SystemExit) as excinfo:
+        main([str(inp), "-o", str(outdir), "--saliency", "bogus"])
+    assert excinfo.value.code != 0
+
+
 def test_cli_as_subprocess(tmp_path):
     """Smoke-test ``python -m pbn`` so the installed entry point works."""
     inp = tmp_path / "in.png"

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pbn.io import load_image, save_image
 from pbn.pipeline import CLEANUP_CHOICES, SMOOTHING_CHOICES, generate
+from pbn.saliency import SALIENCY_MODES
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -89,6 +90,18 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--saliency",
+        choices=SALIENCY_MODES,
+        default="none",
+        help=(
+            "per-pixel weighting passed as sample_weight to K-means. "
+            "'none' (default) keeps the unweighted fit; 'center' biases "
+            "centroids towards the canvas centre; 'auto' uses "
+            "cv2.saliency.StaticSaliencyFineGrained when opencv-contrib-"
+            "python is installed, otherwise a Sobel-magnitude fallback."
+        ),
+    )
+    p.add_argument(
         "--scale",
         type=int,
         default=4,
@@ -132,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
         max_regions=args.max_regions,
         cleanup=args.cleanup,
         min_delta_e=args.min_delta_e,
+        saliency=args.saliency,
     )
 
     args.output.mkdir(parents=True, exist_ok=True)
@@ -143,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
         "k": int(len(result.palette)),
         "effective_k": int(result.effective_k),
         "min_delta_e": float(args.min_delta_e),
+        "saliency": args.saliency,
         "colors": [
             {"index": i + 1, "rgb": [int(c) for c in rgb]}
             for i, rgb in enumerate(result.palette[: result.effective_k])

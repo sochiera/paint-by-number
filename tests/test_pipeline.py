@@ -275,3 +275,66 @@ def test_generate_rejects_unknown_cleanup():
     image = _make_stripe_image()
     with pytest.raises(ValueError):
         generate(image, k=3, cleanup="bogus")
+
+
+def _dark_dominant_with_central_subject(size: int = 96) -> np.ndarray:
+    """Background of varied dark tones (~96 % of pixels) plus a small
+    central magenta subject. Without saliency the K-means budget is spent
+    on dark tones and the subject blends; with ``saliency='center'`` at
+    least one centroid lands on it.
+    """
+    img = np.empty((size, size, 3), dtype=np.uint8)
+    half = size // 2
+    img[:half, :half] = (200, 60, 60)
+    img[:half, half:] = (60, 200, 60)
+    img[half:, :half] = (60, 60, 200)
+    img[half:, half:] = (200, 200, 60)
+    cy = cx = size // 2
+    radius = max(2, size // 12)
+    img[cy - radius : cy + radius, cx - radius : cx + radius] = (180, 60, 200)
+    return img
+
+
+def test_saliency_center_shifts_palette_towards_subject():
+    image = _dark_dominant_with_central_subject()
+    target = np.array([180, 60, 200], dtype=np.float32)
+
+    result_none = generate(
+        image, k=4, min_region_size=0, smooth="none", cleanup="none",
+        min_delta_e=0.0, template_scale=1, saliency="none",
+    )
+    result_center = generate(
+        image, k=4, min_region_size=0, smooth="none", cleanup="none",
+        min_delta_e=0.0, template_scale=1, saliency="center",
+    )
+
+    def _closest_distance(palette: np.ndarray, k: int) -> float:
+        return float(
+            np.linalg.norm(palette[:k].astype(np.float32) - target, axis=1).min()
+        )
+
+    d_none = _closest_distance(result_none.palette, result_none.effective_k)
+    d_center = _closest_distance(
+        result_center.palette, result_center.effective_k
+    )
+    assert d_none > 60
+    assert d_center < d_none - 15, (
+        f"saliency='center' should pull a centroid materially closer to "
+        f"{target.tolist()}; closest was {d_center:.1f} vs none={d_none:.1f}"
+    )
+
+
+def test_saliency_none_matches_baseline():
+    image = _make_stripe_image()
+    base = generate(image, k=3, min_region_size=5, template_scale=1)
+    explicit = generate(
+        image, k=3, min_region_size=5, template_scale=1, saliency="none"
+    )
+    assert np.array_equal(base.palette, explicit.palette)
+    assert np.array_equal(base.indices, explicit.indices)
+
+
+def test_generate_rejects_unknown_saliency():
+    image = _make_stripe_image()
+    with pytest.raises(ValueError):
+        generate(image, k=3, saliency="bogus")

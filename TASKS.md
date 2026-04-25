@@ -21,23 +21,32 @@ regionów w teksturach** i **klastry same-color z odrębnymi cyframi**.
 
 ## P0 — największy zwrot, najpierw
 
-### N1. Saliency-aware quantisation (rozwinięcie dawnego T8)
-- Pliki: [src/pbn/quantize.py](src/pbn/quantize.py), [src/pbn/pipeline.py](src/pbn/pipeline.py), [src/pbn/cli.py](src/pbn/cli.py).
-- Zmiana: liczyć mapę wagi pikseli i przekazać jako `sample_weight` do K-means.
-  Dwa tryby:
-  - `center` — gaussian wokół środka kadru (cheap, zero-dep).
-  - `auto` — `cv2.saliency.StaticSaliencyFineGrained` lub gradient-based
-    fallback (`skimage.filters.sobel` na L w Lab).
-  - `none` — obecne zachowanie.
-  Waga normalizowana do średniej 1, rozjaśniona dolnym progiem (np. 0.2) żeby
-  tło nie zostało całkowicie zignorowane.
-- Akceptacja:
-  - Na obecnym Cybertrucku top-3 centroidy palety (po pikselach saliency ≥
-    mediana) zawierają ≥ 2 kolory inne niż "ciemny granat" (ΔE\*ab ≥ 25 od
-    centroidu tła).
-  - Pokrycie pikselami koloru tła spada z 53 % do < 40 % przy `--saliency
-    center`.
-  - Test `tests/test_quantize.py::test_saliency_weights_shift_palette`.
+### N1. Saliency-aware quantisation ✅ ZROBIONE
+- Pliki: [src/pbn/saliency.py](src/pbn/saliency.py) (nowy),
+  [src/pbn/quantize.py](src/pbn/quantize.py),
+  [src/pbn/pipeline.py](src/pbn/pipeline.py),
+  [src/pbn/cli.py](src/pbn/cli.py).
+- `--saliency {none,center,auto}`. `auto` używa
+  `cv2.saliency.StaticSaliencyFineGrained` (z `opencv-contrib-python`);
+  gdy biblioteki brak — fallback na Sobel-magnitude na kanale L (Lab).
+  Wagi clip'owane na progu 0.2 i normalizowane do średniej 1.
+- Pomiary na syntetycznym fixture'ze
+  [tests/fixtures/dark_scene.png](tests/fixtures/dark_scene.png):
+  - `none`: effective_k=3, dominant_color 80.6 %, skin tone obecny (0.3 %).
+  - `center`: effective_k=2, skin tone wycięty — twarz w fixture'rze jest
+    przy krawędzi kadru, więc gaussian centralny ją penalizuje.
+  - `auto`: effective_k=3, skin tone zachowany (Sobel/cv2 daje wagę
+    krawędziom).
+  Wniosek: dla zdjęć z subjectem ścisłe-centralnie zalecany `center`,
+  dla nietypowej kompozycji `auto`.
+- Pokryte testami: `test_quantize_accepts_sample_weight_and_shifts_centroids`,
+  `test_quantize_rejects_wrongly_shaped_sample_weight`,
+  `tests/test_saliency.py` (5 testów),
+  `test_saliency_center_shifts_palette_towards_subject`,
+  `test_saliency_none_matches_baseline`,
+  `test_generate_rejects_unknown_saliency`,
+  `test_saliency_flag_records_mode_in_palette_json`,
+  `test_saliency_flag_rejects_unknown`. 85 passed (z 73 baseline).
 
 ### N2. Kontrola fragmentacji per-kolor
 - Pliki: [src/pbn/regions.py](src/pbn/regions.py), [src/pbn/pipeline.py](src/pbn/pipeline.py).

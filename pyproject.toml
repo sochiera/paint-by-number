@@ -15,6 +15,11 @@ dependencies = [
     "scipy",
 ]
 
+[project.optional-dependencies]
+# Enables --smooth meanshift and --saliency auto (cv2.saliency). Without it,
+# --saliency auto silently falls back to a Sobel-magnitude weight map.
+opencv = ["opencv-contrib-python"]
+
 [project.scripts]
 pbn = "pbn.cli:main"
 

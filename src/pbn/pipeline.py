@@ -9,6 +9,7 @@ from skimage.restoration import denoise_bilateral
 from pbn.quantize import quantize
 from pbn.regions import merge_small_regions, merge_to_target_count
 from pbn.render import render_palette, render_preview, render_template
+from pbn.saliency import SALIENCY_MODES, compute_saliency_weights
 
 
 SMOOTHING_CHOICES = ("none", "gaussian", "bilateral", "meanshift")
@@ -136,6 +137,7 @@ def generate(
     max_regions: int | None = None,
     cleanup: str | None = "majority",
     min_delta_e: float = 7.0,
+    saliency: str = "none",
 ) -> PBNResult:
     """Turn an RGB image into a paint-by-number template bundle.
 
@@ -175,6 +177,13 @@ def generate(
         threshold are collapsed by re-running K-means with ``k - 1`` until
         every remaining pair is at least ``min_delta_e`` apart (or only two
         centroids remain). Set to ``0`` to disable collapsing. Default ``7``.
+    saliency : per-pixel weighting strategy passed as ``sample_weight`` to
+        K-means. ``"none"`` (default) keeps the unweighted fit; ``"center"``
+        uses a Gaussian centred on the canvas; ``"auto"`` calls
+        ``cv2.saliency.StaticSaliencyFineGrained`` if available, with a
+        Sobel-magnitude fallback otherwise. Pulls centroids towards the
+        weighted areas so subjects in cluttered backgrounds get their own
+        palette colours.
     """
     if image.ndim != 3 or image.shape[2] != 3:
         raise ValueError(f"expected (H, W, 3) RGB image, got {image.shape}")
@@ -189,6 +198,11 @@ def generate(
             f"unknown cleanup mode {cleanup!r}; "
             f"expected one of {CLEANUP_CHOICES}"
         )
+    if saliency not in SALIENCY_MODES:
+        raise ValueError(
+            f"unknown saliency mode {saliency!r}; "
+            f"expected one of {SALIENCY_MODES}"
+        )
 
     working = _smooth(
         image,
@@ -200,11 +214,13 @@ def generate(
         meanshift_sr=meanshift_sr,
     )
 
+    weights = compute_saliency_weights(working, mode=saliency)
     palette, indices, effective_k = quantize(
         working,
         k=k,
         random_state=random_state,
         min_delta_e=min_delta_e,
+        sample_weight=weights,
     )
 
     if cleanup_mode == "majority":

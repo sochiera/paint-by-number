@@ -16,6 +16,9 @@ def _fit_kmeans(
         random_state=random_state,
         n_init=10,
     ).fit(lab_pixels, sample_weight=sample_weight)
+    # ``predict`` is unweighted (nearest-centroid by Euclidean distance), which
+    # is what we want for the per-pixel index map — every pixel still gets the
+    # closest palette colour, even where its sample weight is small.
     labels = kmeans.predict(lab_pixels)
     return kmeans.cluster_centers_, labels
 
@@ -51,11 +54,13 @@ def _collapse_close_lab_centroids(
     labels: np.ndarray,
     min_delta_e: float,
     random_state: int,
+    sample_weight: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Iteratively drop the perceptually-closest centroid pair by re-running
-    K-means with ``k - 1`` clusters, weighted by the current cluster sizes
-    (so the merged cluster keeps its voice). Stops when all remaining pairs
-    have ``delta_e >= min_delta_e`` or only two centroids remain.
+    K-means with ``k - 1`` clusters. ``sample_weight`` is forwarded so the
+    re-fits stay consistent with the initial weighted fit. Stops when all
+    remaining pairs have ``delta_e >= min_delta_e`` or only two centroids
+    remain.
     """
     if min_delta_e <= 0:
         return centroids_lab, labels
@@ -65,13 +70,11 @@ def _collapse_close_lab_centroids(
         if min_d >= min_delta_e:
             break
         new_k = len(centroids_lab) - 1
-        # Weight each pixel by 1 (equivalent to unweighted re-fit on the
-        # original pixels); this is the straightforward "re-run K-means
-        # with k-1" the task description calls for.
         centroids_lab, labels = _fit_kmeans(
             lab_pixels,
             n_clusters=new_k,
             random_state=random_state,
+            sample_weight=sample_weight,
         )
 
     return centroids_lab, labels
@@ -82,9 +85,17 @@ def quantize(
     k: int,
     random_state: int = 0,
     min_delta_e: float = 7.0,
+    sample_weight: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, int]:
     """Reduce an RGB image to a palette of at most ``k`` colours via K-means
     in CIELab, collapsing centroid pairs closer than ``min_delta_e`` (CIE76).
+
+    Parameters
+    ----------
+    sample_weight : optional ``(H, W)`` or flat ``(H*W,)`` array of
+        non-negative per-pixel weights. Pulls centroids towards heavily
+        weighted pixels (e.g. saliency maps); per-pixel index assignment
+        stays unweighted so every pixel still maps to its closest centroid.
 
     Returns ``(palette, indices, effective_k)`` where:
       * ``palette`` is ``(k, 3) uint8`` — only the first ``effective_k`` rows
@@ -103,11 +114,25 @@ def quantize(
     lab_image = rgb2lab(image)
     lab_pixels = lab_image.reshape(-1, 3)
 
+    weight_flat: np.ndarray | None = None
+    if sample_weight is not None:
+        weight_flat = np.asarray(sample_weight, dtype=np.float64).reshape(-1)
+        if weight_flat.shape[0] != h * w:
+            raise ValueError(
+                f"sample_weight has {weight_flat.shape[0]} entries; expected "
+                f"{h * w} (image is {h}x{w})"
+            )
+        if (weight_flat < 0).any():
+            raise ValueError("sample_weight must be non-negative")
+
     unique_rgb = np.unique(image.reshape(-1, 3), axis=0)
     initial_k = min(k, len(unique_rgb))
 
     centroids_lab, labels = _fit_kmeans(
-        lab_pixels, n_clusters=initial_k, random_state=random_state
+        lab_pixels,
+        n_clusters=initial_k,
+        random_state=random_state,
+        sample_weight=weight_flat,
     )
 
     centroids_lab, labels = _collapse_close_lab_centroids(
@@ -116,6 +141,7 @@ def quantize(
         labels,
         min_delta_e=min_delta_e,
         random_state=random_state,
+        sample_weight=weight_flat,
     )
 
     # Reindex labels into a contiguous ``[0, effective_k)`` range so the

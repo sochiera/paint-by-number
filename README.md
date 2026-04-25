@@ -35,8 +35,10 @@ pip install -e .
 ```
 
 Dependencies (from `pyproject.toml`): `numpy`, `Pillow`, `scikit-image`,
-`scikit-learn`, `scipy`. `--smooth meanshift` additionally requires
-`opencv-python`.
+`scikit-learn`, `scipy`. The optional `opencv` extra (`pip install -e
+'.[opencv]'`) installs `opencv-contrib-python`, which enables
+`--smooth meanshift` and `--saliency auto`'s OpenCV saliency backend
+(otherwise `--saliency auto` falls back to a Sobel-magnitude weight map).
 
 ## CLI
 
@@ -69,6 +71,11 @@ Options:
   merging the smallest ones. Disabled by default.
 - `--min-delta-e` — minimum CIE76 Lab distance between any two palette
   centroids (default 7.0, `0` disables).
+- `--saliency {none,center,auto}` — per-pixel `sample_weight` for K-means.
+  `none` (default) keeps the unweighted fit; `center` uses a Gaussian
+  centred on the canvas (cheap, no extra deps); `auto` calls
+  `cv2.saliency.StaticSaliencyFineGrained` when `opencv-contrib-python` is
+  installed, with a Sobel-magnitude fallback otherwise.
 - `--scale` — nearest-neighbour upscale of the template so digits are
   legible (default 4). Outlines are dilated 1 px at scale ≥ 4, 2 px at
   scale ≥ 6.
@@ -80,7 +87,7 @@ Options:
 - `template.png` — `(H·scale, W·scale, 3)` printable template.
 - `legend.png` — palette legend.
 - `palette.json` — `{"k": N, "effective_k": M, "min_delta_e": F,
-  "colors": [{"index": 1, "rgb": [r, g, b]}, …]}`.
+  "saliency": "...", "colors": [{"index": 1, "rgb": [r, g, b]}, …]}`.
 
 ## Programmatic use
 
@@ -115,7 +122,7 @@ result = generate(
 pytest
 ```
 
-81 tests across IO, Lab quantisation, region labelling and merging,
+85+ tests across IO, Lab quantisation, region labelling and merging,
 boundary detection, label placement (including lead-lines for tiny
-regions), template rendering (including dilated outlines), the full
-pipeline, and the CLI (in-process + subprocess smoke).
+regions), template rendering (including dilated outlines), saliency
+weighting, the full pipeline, and the CLI (in-process + subprocess smoke).

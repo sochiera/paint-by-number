@@ -185,3 +185,63 @@ def test_palette_reports_effective_k():
     unique_used = np.unique(indices)
     assert len(unique_used) == effective_k
     assert int(indices.max()) < effective_k
+
+
+def _four_corners_one_centre_image(size: int = 96) -> np.ndarray:
+    """Four equal-area corner colours plus a tiny central "subject" colour.
+    With ``k=4`` an unweighted fit fills its budget with the four large
+    corner clusters; a centre-weighted fit must sacrifice one corner for
+    the central colour.
+    """
+    img = np.empty((size, size, 3), dtype=np.uint8)
+    half = size // 2
+    img[:half, :half] = (200, 60, 60)      # top-left   — red
+    img[:half, half:] = (60, 200, 60)      # top-right  — green
+    img[half:, :half] = (60, 60, 200)      # bottom-left — blue
+    img[half:, half:] = (200, 200, 60)     # bottom-right — yellow
+    cy = cx = size // 2
+    radius = max(2, size // 12)
+    img[cy - radius : cy + radius, cx - radius : cx + radius] = (180, 60, 200)  # magenta
+    return img
+
+
+def test_quantize_accepts_sample_weight_and_shifts_centroids():
+    img = _four_corners_one_centre_image()
+    target = np.array([180, 60, 200], dtype=np.float32)
+    k = 4
+
+    pal_unweighted, _, _ = quantize(
+        img, k=k, random_state=0, min_delta_e=0.0
+    )
+    d_unweighted = np.linalg.norm(
+        pal_unweighted.astype(np.float32) - target, axis=1
+    ).min()
+
+    h, w = img.shape[:2]
+    yy, xx = np.mgrid[0:h, 0:w]
+    cy, cx = h / 2, w / 2
+    sigma = max(h, w) / 16.0
+    weights = np.exp(-((yy - cy) ** 2 + (xx - cx) ** 2) / (2 * sigma**2))
+    weights = weights.astype(np.float32)
+    pal_weighted, _, _ = quantize(
+        img, k=k, random_state=0, min_delta_e=0.0, sample_weight=weights
+    )
+    d_weighted = np.linalg.norm(
+        pal_weighted.astype(np.float32) - target, axis=1
+    ).min()
+
+    assert d_unweighted > 60, (
+        "fixture sanity: unweighted fit shouldn't reach the magenta subject; "
+        f"got distance {d_unweighted:.1f}"
+    )
+    assert d_weighted < 30, (
+        "centroid weighting must pull at least one centroid onto the "
+        f"central magenta subject ({target.tolist()}); "
+        f"weighted nearest distance={d_weighted:.1f}"
+    )
+
+
+def test_quantize_rejects_wrongly_shaped_sample_weight():
+    img = _two_color_image()
+    with pytest.raises(ValueError):
+        quantize(img, k=2, sample_weight=np.ones(7, dtype=np.float32))
