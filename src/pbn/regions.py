@@ -122,6 +122,87 @@ def _component_adjacency(
     return adjacency
 
 
+def cap_fragments_per_color(
+    indices: np.ndarray, max_per_color: int
+) -> np.ndarray:
+    """Limit the number of 4-connected components per palette index.
+
+    For each palette index whose component count exceeds ``max_per_color``,
+    the smallest components of that colour are repainted into their
+    longest-shared-border neighbour **of a different colour** until the
+    count drops to the cap (or no different-colour neighbour exists).
+
+    The total number of regions is unchanged or decreased: an absorbed
+    fragment fuses into the neighbour's component when they share a border
+    of the new colour. The dtype and shape of ``indices`` are preserved.
+    """
+    if indices.ndim != 2:
+        raise ValueError(f"expected 2D indices, got shape {indices.shape}")
+    if max_per_color < 1:
+        raise ValueError(
+            f"max_per_color must be >= 1, got {max_per_color}"
+        )
+
+    result = indices.copy()
+    while True:
+        labels = label_regions(result)
+        n_components = int(labels.max()) + 1
+        flat_labels = labels.ravel()
+        flat_idx = result.ravel()
+        # Snapshot each component's palette index by reading any pixel of it.
+        first_pos = np.unique(flat_labels, return_index=True)[1]
+        palette_of = flat_idx[first_pos].astype(np.int64)
+        sizes = np.bincount(flat_labels)
+
+        # Group components by palette index.
+        groups: dict[int, list[int]] = {}
+        for comp in range(n_components):
+            groups.setdefault(int(palette_of[comp]), []).append(comp)
+        over_budget = {
+            pal: comps
+            for pal, comps in groups.items()
+            if len(comps) > max_per_color
+        }
+        if not over_budget:
+            break
+
+        adjacency = _component_adjacency(labels)
+        # For each over-budget colour pick the smallest component and absorb
+        # it into its longest-bordered different-colour neighbour. We do
+        # *one* merge per outer loop iteration so the adjacency snapshot
+        # stays correct (after a merge the topology changes); cheap because
+        # `label_regions` is fast on the small indexed array.
+        progress = False
+        for pal, comps in sorted(over_budget.items()):
+            comps_sorted = sorted(
+                comps,
+                key=lambda c: (int(sizes[c]), int(c)),
+            )
+            for comp in comps_sorted:
+                neighbour_borders: Counter[int] = Counter()
+                for nbr, border in adjacency.get(comp, {}).items():
+                    if int(palette_of[nbr]) == pal:
+                        continue
+                    neighbour_borders[int(palette_of[nbr])] += border
+                if not neighbour_borders:
+                    # All neighbours share this colour (rare on real images).
+                    continue
+                best_colour = max(
+                    neighbour_borders.items(),
+                    key=lambda item: (item[1], -item[0]),
+                )[0]
+                result[labels == comp] = best_colour
+                progress = True
+                break
+            if progress:
+                break
+
+        if not progress:
+            break
+
+    return result
+
+
 def merge_to_target_count(indices: np.ndarray, max_regions: int) -> np.ndarray:
     """Iteratively merge the smallest 4-connected region into its neighbour
     with the longest shared border until the total number of components

@@ -190,6 +190,41 @@ def test_saliency_flag_rejects_unknown(tmp_path):
     assert excinfo.value.code != 0
 
 
+def test_max_per_color_flag(tmp_path):
+    inp = tmp_path / "in.png"
+    _write_stripe_image(inp)
+    outdir = tmp_path / "out_maxpercolor"
+
+    exit_code = main(
+        [
+            str(inp),
+            "-o",
+            str(outdir),
+            "-k",
+            "3",
+            "--min-region",
+            "2",
+            "--scale",
+            "2",
+            "--max-per-color",
+            "8",
+        ]
+    )
+    assert exit_code == 0
+    assert (outdir / "preview.png").exists()
+
+
+def test_max_per_color_flag_rejects_zero(tmp_path):
+    import pytest
+
+    inp = tmp_path / "in.png"
+    _write_stripe_image(inp)
+    outdir = tmp_path / "out_maxpercolor_zero"
+    with pytest.raises(SystemExit) as excinfo:
+        main([str(inp), "-o", str(outdir), "--max-per-color", "0"])
+    assert excinfo.value.code != 0
+
+
 def test_cli_as_subprocess(tmp_path):
     """Smoke-test ``python -m pbn`` so the installed entry point works."""
     inp = tmp_path / "in.png"

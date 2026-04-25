@@ -48,21 +48,26 @@ regionów w teksturach** i **klastry same-color z odrębnymi cyframi**.
   `test_saliency_flag_records_mode_in_palette_json`,
   `test_saliency_flag_rejects_unknown`. 85 passed (z 73 baseline).
 
-### N2. Kontrola fragmentacji per-kolor
-- Pliki: [src/pbn/regions.py](src/pbn/regions.py), [src/pbn/pipeline.py](src/pbn/pipeline.py).
-- Problem: `--max-regions` tnie globalnie, ale nie chroni przed sytuacją "jeden
-  kolor rozbity na 200 fragmentów". W teksturze (tłum) to dezorientuje
-  malarza.
-- Zmiana: po `merge_to_target_count` uruchom drugi pass — dla każdego koloru
-  policz fragmenty; jeżeli > `max_per_color`, scalaj najmniejsze fragmenty
-  tego koloru z najbliższym sąsiadem o **innym** kolorze (kompromis między
-  "zachowaj odrębność tekstury" a "nie rób z mapy konfetti"). CLI:
-  `--max-per-color N` (domyślnie ~25).
-- Akceptacja:
-  - Po stage'u żaden kolor nie ma > N fragmentów (test parametryczny).
-  - Liczba widocznych "punkcików" w tłumie (regiony < 200 px na cropie z
-    [out/template.png](out/template.png)) spada ≥ 60 %.
-  - Test `tests/test_regions.py::test_max_per_color_caps_fragments`.
+### N2. Kontrola fragmentacji per-kolor ✅ ZROBIONE
+- Pliki: [src/pbn/regions.py](src/pbn/regions.py),
+  [src/pbn/pipeline.py](src/pbn/pipeline.py),
+  [src/pbn/cli.py](src/pbn/cli.py).
+- `cap_fragments_per_color` — dla każdego koloru z > N fragmentami bierze
+  najmniejszy fragment i przemalowuje go na sąsiada o najdłuższej granicy
+  i **innym** kolorze. CLI: `--max-per-color N`.
+- Pomiar na noisy fixture'ze (400×600, 8 kolorów, max-regions=300):
+  - bez cap: 113 komponentów total, najgorszy kolor 45 fragmentów.
+  - cap=25: 81 komponentów total (-28 %), żaden kolor > 25.
+  - cap=15: 60 komponentów total (-47 %).
+- Pokryte testami: `test_cap_fragments_per_color_caps_count`,
+  `test_cap_fragments_per_color_preserves_large_regions`,
+  `test_cap_fragments_per_color_noop_when_under_cap`,
+  `test_cap_fragments_per_color_rejects_bad_arg`,
+  `test_cap_fragments_per_color_deterministic`,
+  `test_max_per_color_caps_fragments_in_pipeline`,
+  `test_max_per_color_none_is_noop`,
+  `test_max_per_color_flag`,
+  `test_max_per_color_flag_rejects_zero`. 94 passed (z 85 po N1).
 
 ### N3. Przedkwantyzacyjna segmentacja superpikselami (SLIC)
 - Pliki: nowy `src/pbn/segment.py`, [src/pbn/pipeline.py](src/pbn/pipeline.py), [src/pbn/cli.py](src/pbn/cli.py).

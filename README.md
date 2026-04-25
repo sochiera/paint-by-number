@@ -69,6 +69,11 @@ Options:
   longest-shared-border neighbour (default 20, `0` disables).
 - `--max-regions` — cap the number of 4-connected regions by iteratively
   merging the smallest ones. Disabled by default.
+- `--max-per-color` — cap the number of 4-connected components per
+  individual palette colour. Smallest fragments of an over-budget colour
+  are repainted to their longest-bordered different-colour neighbour, so
+  textured areas stop spawning scattered same-numbered specks. Disabled by
+  default.
 - `--min-delta-e` — minimum CIE76 Lab distance between any two palette
   centroids (default 7.0, `0` disables).
 - `--saliency {none,center,auto}` — per-pixel `sample_weight` for K-means.

@@ -7,7 +7,11 @@ from scipy import ndimage
 from skimage.restoration import denoise_bilateral
 
 from pbn.quantize import quantize
-from pbn.regions import merge_small_regions, merge_to_target_count
+from pbn.regions import (
+    cap_fragments_per_color,
+    merge_small_regions,
+    merge_to_target_count,
+)
 from pbn.render import render_palette, render_preview, render_template
 from pbn.saliency import SALIENCY_MODES, compute_saliency_weights
 
@@ -135,6 +139,7 @@ def generate(
     meanshift_sp: float = 10.0,
     meanshift_sr: float = 20.0,
     max_regions: int | None = None,
+    max_per_color: int | None = None,
     cleanup: str | None = "majority",
     min_delta_e: float = 7.0,
     saliency: str = "none",
@@ -167,6 +172,12 @@ def generate(
         in the output. When set, the smallest regions are iteratively merged
         into the adjacent region with the longest shared border until the
         total drops to this value. ``None`` (default) disables the stage.
+    max_per_color : optional upper bound on the number of 4-connected
+        components for each individual palette colour. Smallest fragments
+        of an over-budget colour are absorbed into their longest-bordered
+        neighbour of a *different* colour, so the painter's eye isn't drawn
+        to scattered same-numbered specks. Runs after ``max_regions``;
+        ``None`` (default) disables it.
     cleanup : label-map cleanup mode applied after quantisation and before
         region merging. ``"majority"`` (default) replaces each pixel's label
         with the most frequent label in its 3x3 neighbourhood, which
@@ -231,6 +242,11 @@ def generate(
 
     if max_regions is not None:
         indices = merge_to_target_count(indices, max_regions=max_regions)
+
+    if max_per_color is not None:
+        indices = cap_fragments_per_color(
+            indices, max_per_color=max_per_color
+        )
 
     used_palette = palette[:effective_k]
     preview = render_preview(used_palette, indices)

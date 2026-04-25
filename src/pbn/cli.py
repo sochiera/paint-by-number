@@ -78,6 +78,19 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--max-per-color",
+        type=int,
+        default=None,
+        dest="max_per_color",
+        help=(
+            "cap the number of 4-connected components per palette colour "
+            "by repainting the smallest over-budget fragments to their "
+            "longest-bordered different-colour neighbour. Suppresses "
+            "scattered same-numbered specks in textured areas. Disabled "
+            "by default."
+        ),
+    )
+    p.add_argument(
         "--min-delta-e",
         type=float,
         default=7.0,
@@ -128,6 +141,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(
             f"--max-regions must be >= 1, got {args.max_regions}"
         )
+    if args.max_per_color is not None and args.max_per_color < 1:
+        parser.error(
+            f"--max-per-color must be >= 1, got {args.max_per_color}"
+        )
     if args.min_delta_e < 0:
         parser.error(
             f"--min-delta-e must be >= 0, got {args.min_delta_e}"
@@ -143,6 +160,7 @@ def main(argv: list[str] | None = None) -> int:
         random_state=args.seed,
         smooth=args.smooth,
         max_regions=args.max_regions,
+        max_per_color=args.max_per_color,
         cleanup=args.cleanup,
         min_delta_e=args.min_delta_e,
         saliency=args.saliency,

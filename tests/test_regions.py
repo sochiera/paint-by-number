@@ -1,6 +1,11 @@
 import numpy as np
+import pytest
 
-from pbn.regions import label_regions, merge_to_target_count
+from pbn.regions import (
+    cap_fragments_per_color,
+    label_regions,
+    merge_to_target_count,
+)
 
 
 def _count_components(indices: np.ndarray) -> int:
@@ -152,4 +157,98 @@ def test_merge_to_target_count_deterministic():
     indices = _make_scattered_indices(seed=7)
     a = merge_to_target_count(indices, max_regions=4)
     b = merge_to_target_count(indices, max_regions=4)
+    np.testing.assert_array_equal(a, b)
+
+
+def _components_per_color(indices: np.ndarray) -> dict[int, int]:
+    """Map ``palette_index -> number of 4-connected components of that index``."""
+    labels = label_regions(indices)
+    flat_labels = labels.ravel()
+    flat_idx = indices.ravel()
+    # For each component label, the palette index is the same everywhere.
+    first_pos = np.unique(flat_labels, return_index=True)[1]
+    palette_of_label = flat_idx[first_pos]
+    counts: dict[int, int] = {}
+    for pal in palette_of_label.tolist():
+        counts[int(pal)] = counts.get(int(pal), 0) + 1
+    return counts
+
+
+def _make_overfragmented_color_indices() -> np.ndarray:
+    """A 14×14 grid: a single big colour-0 background, a couple of colour-1
+    shapes (large enough to keep) and many isolated colour-2 specks scattered
+    across the background. Colour 2 should have many components; capping it
+    must repaint the smallest specks to colour 0 (the only adjacent colour
+    for a single isolated speck)."""
+    indices = np.zeros((14, 14), dtype=np.int32)
+    # Two healthy colour-1 blocks.
+    indices[1:5, 1:5] = 1
+    indices[9:13, 9:13] = 1
+    # Many isolated colour-2 specks.
+    speck_positions = [
+        (1, 7), (1, 9), (1, 11),
+        (3, 7), (3, 11), (3, 13),
+        (5, 7), (5, 9),
+        (7, 1), (7, 5), (7, 7), (7, 9), (7, 11),
+        (9, 1), (9, 3), (9, 5), (9, 7),
+        (11, 1), (11, 5), (11, 7),
+        (13, 1), (13, 3), (13, 5), (13, 7), (13, 9), (13, 11),
+    ]
+    for y, x in speck_positions:
+        indices[y, x] = 2
+    return indices
+
+
+def test_cap_fragments_per_color_caps_count():
+    indices = _make_overfragmented_color_indices()
+    before = _components_per_color(indices)
+    assert before.get(2, 0) > 5, (
+        f"fixture sanity: colour 2 should be heavily fragmented, got {before}"
+    )
+
+    capped = cap_fragments_per_color(indices, max_per_color=5)
+
+    after = _components_per_color(capped)
+    assert after.get(2, 0) <= 5, (
+        f"colour 2 still over cap: {after.get(2, 0)} components"
+    )
+
+
+def test_cap_fragments_per_color_preserves_large_regions():
+    indices = _make_overfragmented_color_indices()
+    capped = cap_fragments_per_color(indices, max_per_color=5)
+
+    # The two big colour-1 blocks must survive (they're already under cap).
+    after = _components_per_color(capped)
+    assert after.get(1, 0) == 2
+
+    # Original colour-1 pixels should not have flipped colour.
+    assert capped[2, 2] == 1
+    assert capped[10, 10] == 1
+
+
+def test_cap_fragments_per_color_noop_when_under_cap():
+    indices = np.array(
+        [
+            [0, 0, 1, 1],
+            [0, 0, 1, 1],
+        ],
+        dtype=np.int32,
+    )
+    capped = cap_fragments_per_color(indices, max_per_color=10)
+    np.testing.assert_array_equal(capped, indices)
+
+
+def test_cap_fragments_per_color_rejects_bad_arg():
+    indices = np.zeros((4, 4), dtype=np.int32)
+    with pytest.raises(ValueError):
+        cap_fragments_per_color(indices, max_per_color=0)
+    with pytest.raises(ValueError):
+        cap_fragments_per_color(indices, max_per_color=-3)
+
+
+def test_cap_fragments_per_color_deterministic():
+    indices = _make_overfragmented_color_indices()
+    a = cap_fragments_per_color(indices, max_per_color=4)
+    b = cap_fragments_per_color(indices, max_per_color=4)
     np.testing.assert_array_equal(a, b)

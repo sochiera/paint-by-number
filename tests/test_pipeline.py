@@ -338,3 +338,62 @@ def test_generate_rejects_unknown_saliency():
     image = _make_stripe_image()
     with pytest.raises(ValueError):
         generate(image, k=3, saliency="bogus")
+
+
+def _speckled_image(size: int = 80, seed: int = 0) -> np.ndarray:
+    """Solid-blue background with many isolated red specks. After quantize
+    + cleanup the red specks survive as many small components of one
+    colour, which is exactly what max_per_color is meant to suppress."""
+    rng = np.random.default_rng(seed)
+    img = np.full((size, size, 3), (40, 60, 200), dtype=np.uint8)
+    placed = 0
+    while placed < 60:
+        y = int(rng.integers(2, size - 2))
+        x = int(rng.integers(2, size - 2))
+        img[y, x] = (220, 30, 30)
+        placed += 1
+    return img
+
+
+def _component_count_per_color(indices: np.ndarray) -> dict[int, int]:
+    from pbn.regions import label_regions  # noqa: PLC0415
+
+    labels = label_regions(indices)
+    flat = labels.ravel()
+    palette_flat = indices.ravel()
+    first = np.unique(flat, return_index=True)[1]
+    out: dict[int, int] = {}
+    for pal in palette_flat[first].tolist():
+        out[int(pal)] = out.get(int(pal), 0) + 1
+    return out
+
+
+def test_max_per_color_caps_fragments_in_pipeline():
+    image = _speckled_image()
+    base = generate(
+        image, k=3, min_region_size=0, smooth="none", cleanup="none",
+        min_delta_e=0.0, template_scale=1, max_regions=None,
+    )
+    capped = generate(
+        image, k=3, min_region_size=0, smooth="none", cleanup="none",
+        min_delta_e=0.0, template_scale=1, max_regions=None,
+        max_per_color=5,
+    )
+    base_counts = _component_count_per_color(base.indices)
+    capped_counts = _component_count_per_color(capped.indices)
+
+    assert max(base_counts.values()) > 10, (
+        f"fixture sanity: expected over-fragmented colour; got {base_counts}"
+    )
+    assert all(n <= 5 for n in capped_counts.values()), (
+        f"max_per_color=5 violated: {capped_counts}"
+    )
+
+
+def test_max_per_color_none_is_noop():
+    image = _make_stripe_image()
+    base = generate(image, k=3, min_region_size=5, template_scale=1)
+    explicit = generate(
+        image, k=3, min_region_size=5, template_scale=1, max_per_color=None
+    )
+    np.testing.assert_array_equal(base.indices, explicit.indices)
